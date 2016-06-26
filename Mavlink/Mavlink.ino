@@ -222,6 +222,8 @@ uint16_t ComprobarPitch(uint16_t Pitch) {
         //No detecta ninguno. Ambos a 0
         return( Pitch = 0 );
       }
+  }else{
+    return( Pitch = 0 );
   }
 }
 
@@ -271,6 +273,8 @@ uint16_t ComprobarRoll(uint16_t Roll) {
           //No detecta ninguno. Ambos a 0
           return( Roll = 0 );
         }
+  }else {
+    return( Roll = 0 );
   }
 }
 
