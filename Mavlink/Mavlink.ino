@@ -6,11 +6,11 @@
   NewPing NAME(Trigger, Echo, MAXDIST);
   El valor de MAXDIST es la distancia máxima que mide la librería.
   Si algún Echo devuelve un valor mayor de dicha distancia, se descarta automáticamente*/
-NewPing sonar0(24, 25, 300);
-NewPing sonar1(26, 27, 300);
-NewPing sonar2(28, 29, 300);
-NewPing sonar3(30, 31, 300);
-NewPing sonar4(32, 33, 300);
+NewPing sonar0(3, 4, 300);
+NewPing sonar1(5, 6, 300);
+NewPing sonar2(7, 8, 300);
+NewPing sonar3(9, 10, 300);
+NewPing sonar4(11, 12, 300);
 
 //Variable utilizada para controlar que el HeartBeat se envíe cada segundo
 unsigned long HeartbeatTime = 0; 
@@ -42,11 +42,6 @@ Sensores Sensor[NSensores];
 
 void setup() {
   Serial.begin(57600);
-  //Activar pines 22 y 23 para alimentar a los ultrasonidos, ya que sólo se dispone de 3 salidas de 5v
-  pinMode(22, OUTPUT);           // set pin to input
-  digitalWrite(22, HIGH);       // turn on pullup resistors
-  pinMode(23, OUTPUT);           // set pin to input
-  digitalWrite(23, HIGH);       // turn on pullup resistors
 }
 
 void loop() {
