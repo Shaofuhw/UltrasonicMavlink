@@ -32,6 +32,7 @@ struct Sensores {
   uint16_t MediaDistancias = 0;
   bool Cerca = false;
   bool Activo = false;
+  unsigned long CompensarTime = 0;
 };
 
 //Se inician las variables de cada sensor
@@ -77,20 +78,6 @@ void FRCOverride() {
   mavlink_message_t msg;
   uint8_t buf[MAVLINK_MAX_PACKET_LEN];
   uint16_t len;
-  
-  /*mavlink_msg_rc_channels_override_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,
-    uint8_t target_system, uint8_t target_component, uint16_t chan1_raw, uint16_t chan2_raw, uint16_t chan3_raw,
-    uint16_t chan4_raw, uint16_t chan5_raw, uint16_t chan6_raw, uint16_t chan7_raw, uint16_t chan8_raw)*/
-    
-  /*Channel 1 = Roll
-    Channel 2 = Pitch
-    Channel 3 = Throttle
-    Channel 4 = Yaw*/
-
-  /*Sensor0 = Delantero
-    Sensor1 = Derecha
-    Sensor2 = Trasero
-    Sensor3 = Izquierda*/
     
   uint16_t Pitch = ComprobarPitch(Pitch);
   uint16_t Roll = ComprobarRoll(Roll);
@@ -161,7 +148,7 @@ void MediaDistancias() {
 //Se comprueba si las media obtenida está por debajo del umbral. 150cm en este caso
 void ComprobarDistancias() {
   //Se establece un mínimo de 5 para la distancia ya que existen ciertos errores de medida en dichos valores
-  for (int i = 0; i < NSensores; i++) {
+  for (uint8_t i = 0; i < NSensores; i++) {
     if (Sensor[i].MediaDistancias > 5 && Sensor[i].MediaDistancias < DistanciaCerca) {
       Sensor[i].Cerca = true;
     } else {
@@ -300,7 +287,7 @@ uint16_t ValorRC( uint16_t Distancia, bool Aumentar ) {
     }else{
       return( 1350 );
     }
-  }else if( Distancia < 150 ) {
+  }else{
     if( Aumentar == true ) {
       return( 1600 );
     }else{
@@ -310,23 +297,44 @@ uint16_t ValorRC( uint16_t Distancia, bool Aumentar ) {
 }
 
 void CompensarInercia() {
+  //Modifica el valor que se envia por RCOverride para compensar la inercia producida por el movimiento anterior
+  //Esta compensación se mantiene durante 100ms. --->TODO: Comprobar y retocar.
+  
   if( PitchOut == 0 ) {
     if( Sensor[0].Activo == true ) {
       //Pitch = 0 y Sensor Activo quiere decir que ha pasado de moverse, a estar quieto. Hay que contrarrestar
-      PitchOut = 1300;
-      Sensor[0].Activo == false;
+      PitchOut = 1350;
+      if(Sensor[0].CompensarTime == 0){
+        Sensor[0].CompensarTime = millis();
+      }
     }else if( Sensor[2].Activo == true ) {
-      PitchOut = 1700;
-      Sensor[2].Activo == false;
+      PitchOut = 1650;
+      if(Sensor[2].CompensarTime == 0){
+        Sensor[2].CompensarTime = millis();
+      }
     }
   }
   if( RollOut == 0 ) {
     if( Sensor[1].Activo == true ) {
-      RollOut = 1700;
-      Sensor[1].Activo == false;
+      RollOut = 1650;
+      if(Sensor[1].CompensarTime == 0){
+        Sensor[1].CompensarTime = millis();
+      }
     }else if( Sensor[3].Activo == true ) {
-      RollOut = 1300;
-      Sensor[3].Activo == false;
+      RollOut = 1350;
+      if(Sensor[3].CompensarTime == 0){
+        Sensor[3].CompensarTime = millis();
+      }
+    }
+  }
+
+  //Comprueba los 4 primeros sensores, si CompensarTime != 0, es que se ha modificado el valor para compensar inercia. Si pasan 100ms, sale.
+  for(uint8_t i = 0; i < NSensores; i++){
+    if(Sensor[i].CompensarTime != 0){
+      if(millis()-Sensor[i].CompensarTime > 100){
+        Sensor[i].CompensarTime = 0;
+        Sensor[i].Activo = false;  
+      }
     }
   }
 }
@@ -359,4 +367,18 @@ void RCOverride(mavlink_message_t *msg, uint16_t len, uint8_t *buf, uint16_t Pit
   Serial.print(",");
   Serial.print(" Roll: ");
   Serial.print(RollOut);*/
+  
+    /*mavlink_msg_rc_channels_override_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,
+    uint8_t target_system, uint8_t target_component, uint16_t chan1_raw, uint16_t chan2_raw, uint16_t chan3_raw,
+    uint16_t chan4_raw, uint16_t chan5_raw, uint16_t chan6_raw, uint16_t chan7_raw, uint16_t chan8_raw)*/
+    
+  /*Channel 1 = Roll
+    Channel 2 = Pitch
+    Channel 3 = Throttle
+    Channel 4 = Yaw*/
+
+  /*Sensor0 = Delantero
+    Sensor1 = Derecha
+    Sensor2 = Trasero
+    Sensor3 = Izquierda*/
 }
