@@ -1,7 +1,7 @@
 #include <NewPing.h>
 #include "C:\Users\Fu\Documents\Arduino\libraries\mavlink\common\mavlink.h"
 
-//=========================================INICIALIZACIONES======================================//
+//==================================INICIALIZACIONES======================================//
 /*Inicialización de los pines de los sensores. Librería "NewPing"
   NewPing NAME(Trigger, Echo, MAXDIST);
   El valor de MAXDIST es la distancia máxima que mide la librería.
@@ -15,7 +15,8 @@ NewPing sonar4(11, 12, 300);
 //Variable utilizada para controlar que el HeartBeat se envíe cada segundo
 unsigned long HeartbeatTime = 0; 
 
-//Variables utilizadas para que sólo envie un RCOverride cada vez que se modifique, y no saturar a la controladora de ordenes redundantes
+//Variables utilizadas para que sólo envie un RCOverride cada vez
+//que se modifique, y no saturar a la controladora de ordenes redundantes
 uint16_t PitchOut;
 uint16_t RollOut;
 uint8_t n = 0;
@@ -23,8 +24,9 @@ bool enviado = false;
 
 #define NDistancias 5
 #define DistanciaCerca 150  //Distancia a la que empieza a actuar el control
-#define AltMin 150 //Altura a la que empieza a actuar el control
+#define AltMin 100 //Altura a la que empieza a actuar el control
 #define DistMin 20 //Diferencia mínima entre dos distancias del mismo eje para moverse.
+#define Compensacion 100 //Tiempo que actúa la compensación de inercia
 
 //Registro para guardar los datos de cada sensor
 struct Sensores {
@@ -39,7 +41,7 @@ struct Sensores {
 #define NSensores 5
 Sensores Sensor[NSensores];
 
-//====================================PROGRAMA===========================================================//
+//====================================PROGRAMA============================================//
 
 void setup() {
   Serial.begin(57600);
@@ -52,19 +54,9 @@ void loop() {
   }
   FSensores();
   FRCOverride();
-  /*//Armar Dron
-    //Pack the message
-    //uint16_t mavlink_msg_command_long_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,uint8_t target_system, uint8_t target_component, uint16_t command, uint8_t confirmation, float param1, float param2, float param3, float param4, float param5, float param6, float param7)
-    mavlink_msg_command_long_pack(255, 0, &msg, 1, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0);
-
-    len = mavlink_msg_to_send_buffer(buf, &msg);
-
-    // Send the message (.write sends as bytes)
-    Serial.write(buf, len);
-    delay(1000);*/
 }
 
-//=======================================================FUNCIONES=======================================================//
+//===========================================FUNCIONES====================================//
 //Tarea encargada de medir los sensores
 void FSensores() {
   ShiftArrays();
@@ -89,7 +81,7 @@ void FRCOverride() {
   }else if( enviado == false ) {
     n += 1;
     if(n == 2){
-      //Se evita que se manden comandos distintos de manera consecutiva. Ya que a veces al cambiar hace cosas extrañas
+      //Se evita que se manden comandos distintos de manera consecutiva. 
       CompensarInercia();
       n = 0;
       RCOverride(&msg, len, buf, PitchOut, RollOut);
@@ -117,7 +109,7 @@ void MedirSensores() {
   Sensor[4].Distancias[0] = sonar4.ping_cm();
 }
 
-//Se realiza la media de todas las distancias. Los 0 se descartan, ya que son medidas que no se han podido realizar
+//Se realiza la media de todas las distancias. Los 0 se descartan
 void MediaDistancias() {
   for (uint8_t i = 0; i < NSensores; i++) {
     uint16_t Total = 0;
@@ -135,7 +127,7 @@ void MediaDistancias() {
     }
   }
   /*Serial.print("\n\rDistancias: ");
-  Serial.print(Sensor[0].MediaDistancias);
+  Serial.print(Sensor[4].MediaDistancias);
   Serial.print(",");
   Serial.print(Sensor[1].MediaDistancias);
   Serial.print(",");
@@ -145,9 +137,9 @@ void MediaDistancias() {
   Serial.print("cm\n\r");*/
 }
 
-//Se comprueba si las media obtenida está por debajo del umbral. 150cm en este caso
+//Se comprueba si las media obtenida está por debajo del umbral.
 void ComprobarDistancias() {
-  //Se establece un mínimo de 5 para la distancia ya que existen ciertos errores de medida en dichos valores
+  //Mínimo de 5 para la distancia. existen errores de medida 
   for (uint8_t i = 0; i < NSensores; i++) {
     if (Sensor[i].MediaDistancias > 5 && Sensor[i].MediaDistancias < DistanciaCerca) {
       Sensor[i].Cerca = true;
@@ -160,7 +152,7 @@ void ComprobarDistancias() {
 //========================MOVIMIENTO=========================//
 uint16_t ComprobarPitch(uint16_t Pitch) {
   int16_t Diferencia = Sensor[0].MediaDistancias - Sensor[2].MediaDistancias;
-  if( Sensor[4].MediaDistancias > AltMin ) {
+  if( Sensor[4].MediaDistancias > AltMin || Sensor[4].MediaDistancias == 0 ) {
     if( abs(Diferencia) > DistMin ) {
     //Diferencia mayor de 20 entre distancias
     if( Sensor[0].Cerca == true ) {
@@ -169,24 +161,24 @@ uint16_t ComprobarPitch(uint16_t Pitch) {
         //Detecta el trasero
         if( Sensor[0].MediaDistancias < Sensor[2].MediaDistancias ) {
           //El sensor frontal tiene una distancia menor
-          return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
           Sensor[0].Activo = true;
+          return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
         }else{
           //El sensor trasero tiene una distancia menor
-          return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
           Sensor[2].Activo = true;
+          return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
         }
       }else{
         //Detecta el frontal, pero no el trasero
-        return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
         Sensor[0].Activo = true;
+        return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
       }
     }else {
       //No detecta el frontal
       if( Sensor[2].Cerca == true ) {
         //Detecta el trasero
-        return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
         Sensor[2].Activo = true;
+        return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
       }else{
         //Ambos tienen una distancia mayor de 150
         return( Pitch = 0 );
@@ -194,12 +186,12 @@ uint16_t ComprobarPitch(uint16_t Pitch) {
     }
   }else if( Sensor[0].Cerca == true && Sensor[2].MediaDistancias == 0 ) {
     //Detecta el de adelante, y el de detrás al no detectar nada, devuelve 0
-    return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
     Sensor[0].Activo = true;
+    return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
     }else if ( Sensor[0].MediaDistancias == 0 && Sensor[2].Cerca == true ) {
       //Lo mismo pero lo contrario
-      return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
       Sensor[2].Activo = true;
+      return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
       }else {
         //No detecta ninguno. Ambos a 0
         return( Pitch = 0 );
@@ -211,7 +203,7 @@ uint16_t ComprobarPitch(uint16_t Pitch) {
 
 uint16_t ComprobarRoll(uint16_t Roll) {  
   int16_t Diferencia = Sensor[1].MediaDistancias - Sensor[3].MediaDistancias;
-  if( Sensor[4].MediaDistancias > AltMin ) {
+  if( Sensor[4].MediaDistancias > AltMin || Sensor[4].MediaDistancias == 0 ) {
     if( abs(Diferencia) > DistMin ) {
       //Diferencia mayor de 20 entre distancias
       if( Sensor[1].Cerca == true ) {
@@ -220,24 +212,24 @@ uint16_t ComprobarRoll(uint16_t Roll) {
           //Detecta el izquierdo
           if( Sensor[1].MediaDistancias < Sensor[3].MediaDistancias ) {
             //El sensor derecho tiene una distancia menor
-            return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
             Sensor[1].Activo = true;
+            return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
           }else{
             //El sensor izquierdo tiene una distancia menor
-            return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
             Sensor[3].Activo = true;
+            return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
           }
         }else{
           //Detecta el derecho, pero no el izquierdo
-          return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
           Sensor[1].Activo = true;
+          return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
         }
       }else {
         //No detecta el derecho
         if( Sensor[3].Cerca == true ) {
           //Detecta el izquierdo
-          return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
           Sensor[3].Activo = true;
+          return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
         }else{
           //Ambos tienen una distancia mayor de 150
           return( Roll = 0 );
@@ -245,12 +237,12 @@ uint16_t ComprobarRoll(uint16_t Roll) {
       }
     }else if( Sensor[1].Cerca == true && Sensor[3].MediaDistancias == 0 ) {
       //Detecta el derecho, y el izquierdo al no detectar nada, devuelve 0
-      return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
       Sensor[1].Activo = true;
+      return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
       }else if ( Sensor[1].MediaDistancias == 0 && Sensor[3].Cerca == true ) {
         //Lo mismo pero lo contrario
-        return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
         Sensor[3].Activo = true;
+        return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
         }else {
           //No detecta ninguno. Ambos a 0
           return( Roll = 0 );
@@ -260,8 +252,9 @@ uint16_t ComprobarRoll(uint16_t Roll) {
   }
 }
 
-//Devuelve un valor de salida dependiendo de a qué distancia se encuentre el obstáculo.
-//A mayor distancia, menor es la necesidad de movimiento. La variable "Aumentar" es para saber en qué dirección es.
+//Devuelve un valor de salida dependiendo de la distancia
+//A mayor distancia, menor es la necesidad de movimiento. 
+//La variable "Aumentar" es para saber en qué dirección es.
 uint16_t ValorRC( uint16_t Distancia, bool Aumentar ) {
   if( Distancia < 30 ) {
     if( Aumentar == true ) {
@@ -297,12 +290,14 @@ uint16_t ValorRC( uint16_t Distancia, bool Aumentar ) {
 }
 
 void CompensarInercia() {
-  //Modifica el valor que se envia por RCOverride para compensar la inercia producida por el movimiento anterior
-  //Esta compensación se mantiene durante 100ms. --->TODO: Comprobar y retocar.
+  //Modifica el valor que se envia por RCOverride para compensar
+  //la inercia producida por el movimiento anterior
+  //Esta compensación se mantiene durante Compensación
   
   if( PitchOut == 0 ) {
-    if( Sensor[0].Activo == true ) {
-      //Pitch = 0 y Sensor Activo quiere decir que ha pasado de moverse, a estar quieto. Hay que contrarrestar
+    if( Sensor[0].Activo ) {
+      //Pitch = 0 y Sensor Activo quiere decir que ha pasado de
+      //moverse, a estar quieto. Hay que contrarrestar
       PitchOut = 1350;
       if(Sensor[0].CompensarTime == 0){
         Sensor[0].CompensarTime = millis();
@@ -331,7 +326,7 @@ void CompensarInercia() {
   //Comprueba los 4 primeros sensores, si CompensarTime != 0, es que se ha modificado el valor para compensar inercia. Si pasan 100ms, sale.
   for(uint8_t i = 0; i < NSensores; i++){
     if(Sensor[i].CompensarTime != 0){
-      if(millis()-Sensor[i].CompensarTime > 100){
+      if(millis()-Sensor[i].CompensarTime > Compensacion){
         Sensor[i].CompensarTime = 0;
         Sensor[i].Activo = false;  
       }
@@ -367,8 +362,20 @@ void RCOverride(mavlink_message_t *msg, uint16_t len, uint8_t *buf, uint16_t Pit
   Serial.print(",");
   Serial.print(" Roll: ");
   Serial.print(RollOut);*/
-  
-    /*mavlink_msg_rc_channels_override_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,
+}
+
+  /*//Armar Dron
+    //Pack the message
+    //uint16_t mavlink_msg_command_long_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,uint8_t target_system, uint8_t target_component, uint16_t command, uint8_t confirmation, float param1, float param2, float param3, float param4, float param5, float param6, float param7)
+    mavlink_msg_command_long_pack(255, 0, &msg, 1, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0);
+
+    len = mavlink_msg_to_send_buffer(buf, &msg);
+
+    // Send the message (.write sends as bytes)
+    Serial.write(buf, len);
+    delay(1000);*/
+
+        /*mavlink_msg_rc_channels_override_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,
     uint8_t target_system, uint8_t target_component, uint16_t chan1_raw, uint16_t chan2_raw, uint16_t chan3_raw,
     uint16_t chan4_raw, uint16_t chan5_raw, uint16_t chan6_raw, uint16_t chan7_raw, uint16_t chan8_raw)*/
     
@@ -381,4 +388,3 @@ void RCOverride(mavlink_message_t *msg, uint16_t len, uint8_t *buf, uint16_t Pit
     Sensor1 = Derecha
     Sensor2 = Trasero
     Sensor3 = Izquierda*/
-}
