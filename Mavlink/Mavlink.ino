@@ -1,5 +1,5 @@
 #include <NewPing.h>
-#include "C:\Users\Fu\Documents\Arduino\libraries\mavlink\common\mavlink.h"
+#include "C:\Users\shaof\OneDrive\Apuntes\4 Grado\2 Semestre\TFG\Arduino\libraries\mavlink\common\mavlink.h"
 
 //==================================INICIALIZACIONES======================================//
 /*Inicialización de los pines de los sensores. Librería "NewPing"
@@ -10,31 +10,34 @@ NewPing sonar0(3, 4, 300);
 NewPing sonar1(5, 6, 300);
 NewPing sonar2(7, 8, 300);
 NewPing sonar3(9, 10, 300);
-NewPing sonar4(11, 12, 300);
-
+NewPing sonar4(11, 12, 100);
+ 
 //Variable utilizada para controlar que el HeartBeat se envíe cada segundo
 unsigned long HeartbeatTime = 0; 
 
 //Variables utilizadas para que sólo envie un RCOverride cada vez
 //que se modifique, y no saturar a la controladora de ordenes redundantes
-uint16_t PitchOut;
-uint16_t RollOut;
-uint8_t n = 0;
-bool enviado = false;
+uint16_t Pitch = 0;
+uint16_t Roll  = 0;
+uint16_t PitchOut = 0;
+uint16_t RollOut  = 0;
+uint16_t PitchOutTemp = 0;
+uint16_t RollOutTemp  = 0;
+uint8_t n         = 0;
 
-#define NDistancias 5
-#define DistanciaCerca 150  //Distancia a la que empieza a actuar el control
-#define AltMin 100 //Altura a la que empieza a actuar el control
-#define DistMin 20 //Diferencia mínima entre dos distancias del mismo eje para moverse.
-#define Compensacion 100 //Tiempo que actúa la compensación de inercia
+#define NDistancias     5
+#define DistanciaCerca  100  //Distancia a la que empieza a actuar el control
+#define AltMin          70 //Altura a la que empieza a actuar el control
+#define DistMin         50 //Diferencia mínima entre dos distancias del mismo eje para moverse.
+#define Compensacion    800 //Tiempo que actúa la compensación de inercia en ms
 
 //Registro para guardar los datos de cada sensor
 struct Sensores {
-  uint16_t Distancias[NDistancias] = {0};
-  uint16_t MediaDistancias = 0;
-  bool Cerca = false;
-  bool Activo = false;
-  unsigned long CompensarTime = 0;
+  uint16_t Distancias[NDistancias]  = {0};
+  uint16_t MediaDistancias          = 0;
+  bool Cerca                        = false;
+  bool Activo                       = false;
+  unsigned long CompensarTime       = 0;
 };
 
 //Se inician las variables de cada sensor
@@ -70,24 +73,24 @@ void FRCOverride() {
   mavlink_message_t msg;
   uint8_t buf[MAVLINK_MAX_PACKET_LEN];
   uint16_t len;
-    
-  uint16_t Pitch = ComprobarPitch(Pitch);
-  uint16_t Roll = ComprobarRoll(Roll);
-  if( Pitch != PitchOut || Roll != RollOut ) {
-    //Sólo envía cuando cambia, se evita sobrecargar la controladora
-    PitchOut = Pitch;
-    RollOut = Roll;
-    enviado = false;
-  }else if( enviado == false ) {
+  
+  Pitch  = ComprobarPitch(Pitch);
+  Roll   = ComprobarRoll(Roll);
+  
+  CompensacionInercia();
+
+  if( Pitch != PitchOutTemp || Roll != RollOutTemp ){
+    n = 0;
+    PitchOutTemp = Pitch;
+    RollOutTemp  = Roll;
+  }else{
     n += 1;
-    if(n == 2){
-      //Se evita que se manden comandos distintos de manera consecutiva. 
-      CompensarInercia();
-      n = 0;
+    if(n == 4){
+      RollOut = RollOutTemp;
+      PitchOut = PitchOutTemp;
       RCOverride(&msg, len, buf, PitchOut, RollOut);
-      enviado = true;
     }
-  }
+  }  
 }
 
 //Desplaza cada array de Distancias en una posición
@@ -112,36 +115,38 @@ void MedirSensores() {
 //Se realiza la media de todas las distancias. Los 0 se descartan
 void MediaDistancias() {
   for (uint8_t i = 0; i < NSensores; i++) {
-    uint16_t Total = 0;
+    int Total   = 0;
     uint8_t Num = 0;
     for (uint8_t j = 0; j < NDistancias; j++) {
-      if (Sensor[i].Distancias[j] != 0 && Sensor[i].Distancias[j] < 300) {
+      if (Sensor[i].Distancias[j] != 0  && Sensor[i].Distancias[j] < 300) {
         Total += Sensor[i].Distancias[j];
         Num += 1;
       }
     }
-    if (Num != 0) {
+    if (Num > 3) {
       Sensor[i].MediaDistancias = Total / Num;
-    } else if (Num == 0) {
+    } else {
       Sensor[i].MediaDistancias = 0;
     }
   }
   /*Serial.print("\n\rDistancias: ");
-  Serial.print(Sensor[4].MediaDistancias);
+  Serial.print(Sensor[0].MediaDistancias);
   Serial.print(",");
   Serial.print(Sensor[1].MediaDistancias);
   Serial.print(",");
   Serial.print(Sensor[2].MediaDistancias);
   Serial.print(",");
   Serial.print(Sensor[3].MediaDistancias);
+  Serial.print(",");
+  Serial.print(Sensor[4].MediaDistancias);
   Serial.print("cm\n\r");*/
 }
 
 //Se comprueba si las media obtenida está por debajo del umbral.
 void ComprobarDistancias() {
-  //Mínimo de 5 para la distancia. existen errores de medida 
+  //Mínimo de 10 para la distancia. existen errores de medida 
   for (uint8_t i = 0; i < NSensores; i++) {
-    if (Sensor[i].MediaDistancias > 5 && Sensor[i].MediaDistancias < DistanciaCerca) {
+    if (Sensor[i].MediaDistancias != 0 && Sensor[i].MediaDistancias < DistanciaCerca) {
       Sensor[i].Cerca = true;
     } else {
       Sensor[i].Cerca = false;
@@ -154,30 +159,26 @@ uint16_t ComprobarPitch(uint16_t Pitch) {
   int16_t Diferencia = Sensor[0].MediaDistancias - Sensor[2].MediaDistancias;
   if( Sensor[4].MediaDistancias > AltMin || Sensor[4].MediaDistancias == 0 ) {
     if( abs(Diferencia) > DistMin ) {
-    //Diferencia mayor de 20 entre distancias
+    //Diferencia mayor de 30 entre ambos sensores
     if( Sensor[0].Cerca == true ) {
       //Detecta el frontal
       if( Sensor[2].Cerca == true ) {
         //Detecta el trasero
         if( Sensor[0].MediaDistancias < Sensor[2].MediaDistancias ) {
           //El sensor frontal tiene una distancia menor
-          Sensor[0].Activo = true;
           return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
         }else{
           //El sensor trasero tiene una distancia menor
-          Sensor[2].Activo = true;
           return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
         }
       }else{
         //Detecta el frontal, pero no el trasero
-        Sensor[0].Activo = true;
         return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
       }
     }else {
       //No detecta el frontal
       if( Sensor[2].Cerca == true ) {
         //Detecta el trasero
-        Sensor[2].Activo = true;
         return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
       }else{
         //Ambos tienen una distancia mayor de 150
@@ -186,11 +187,9 @@ uint16_t ComprobarPitch(uint16_t Pitch) {
     }
   }else if( Sensor[0].Cerca == true && Sensor[2].MediaDistancias == 0 ) {
     //Detecta el de adelante, y el de detrás al no detectar nada, devuelve 0
-    Sensor[0].Activo = true;
     return( Pitch = ValorRC( Sensor[0].MediaDistancias, 1 ) );
     }else if ( Sensor[0].MediaDistancias == 0 && Sensor[2].Cerca == true ) {
       //Lo mismo pero lo contrario
-      Sensor[2].Activo = true;
       return( Pitch = ValorRC( Sensor[2].MediaDistancias, 0 ) );
       }else {
         //No detecta ninguno. Ambos a 0
@@ -212,23 +211,19 @@ uint16_t ComprobarRoll(uint16_t Roll) {
           //Detecta el izquierdo
           if( Sensor[1].MediaDistancias < Sensor[3].MediaDistancias ) {
             //El sensor derecho tiene una distancia menor
-            Sensor[1].Activo = true;
             return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
           }else{
             //El sensor izquierdo tiene una distancia menor
-            Sensor[3].Activo = true;
             return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
           }
         }else{
           //Detecta el derecho, pero no el izquierdo
-          Sensor[1].Activo = true;
           return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
         }
       }else {
         //No detecta el derecho
         if( Sensor[3].Cerca == true ) {
           //Detecta el izquierdo
-          Sensor[3].Activo = true;
           return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
         }else{
           //Ambos tienen una distancia mayor de 150
@@ -237,11 +232,9 @@ uint16_t ComprobarRoll(uint16_t Roll) {
       }
     }else if( Sensor[1].Cerca == true && Sensor[3].MediaDistancias == 0 ) {
       //Detecta el derecho, y el izquierdo al no detectar nada, devuelve 0
-      Sensor[1].Activo = true;
       return( Roll = ValorRC( Sensor[1].MediaDistancias, 0 ) );
       }else if ( Sensor[1].MediaDistancias == 0 && Sensor[3].Cerca == true ) {
         //Lo mismo pero lo contrario
-        Sensor[3].Activo = true;
         return( Roll = ValorRC( Sensor[3].MediaDistancias, 1 ) );
         }else {
           //No detecta ninguno. Ambos a 0
@@ -258,80 +251,85 @@ uint16_t ComprobarRoll(uint16_t Roll) {
 uint16_t ValorRC( uint16_t Distancia, bool Aumentar ) {
   if( Distancia < 30 ) {
     if( Aumentar == true ) {
-      return( 1800 );
-    }else{
-      return( 1200 );
-    }
-  }else if( Distancia < 60 ) {
-    if( Aumentar == true ) {
-      return( 1750 );
-    }else{
-      return( 1250 );
-    }
-  }else if( Distancia < 90 ) {
-    if( Aumentar == true ) {
       return( 1700 );
     }else{
       return( 1300 );
     }
-  }else if( Distancia < 120 ) {
+  }else if( Distancia < 90 ) {
+    if( Aumentar == true ) {
+      return( 1675 );
+    }else{
+      return( 1325 );
+    }
+  }else if( Distancia < 150 ) {
     if( Aumentar == true ) {
       return( 1650 );
     }else{
       return( 1350 );
     }
-  }else{
-    if( Aumentar == true ) {
-      return( 1600 );
-    }else{
-      return( 1400 );
-    }
   }
 }
 
-void CompensarInercia() {
-  //Modifica el valor que se envia por RCOverride para compensar
-  //la inercia producida por el movimiento anterior
-  //Esta compensación se mantiene durante Compensación
-  
-  if( PitchOut == 0 ) {
-    if( Sensor[0].Activo ) {
-      //Pitch = 0 y Sensor Activo quiere decir que ha pasado de
-      //moverse, a estar quieto. Hay que contrarrestar
-      PitchOut = 1350;
-      if(Sensor[0].CompensarTime == 0){
-        Sensor[0].CompensarTime = millis();
-      }
-    }else if( Sensor[2].Activo == true ) {
-      PitchOut = 1650;
-      if(Sensor[2].CompensarTime == 0){
-        Sensor[2].CompensarTime = millis();
-      }
-    }
-  }
-  if( RollOut == 0 ) {
-    if( Sensor[1].Activo == true ) {
-      RollOut = 1650;
-      if(Sensor[1].CompensarTime == 0){
-        Sensor[1].CompensarTime = millis();
-      }
-    }else if( Sensor[3].Activo == true ) {
-      RollOut = 1350;
-      if(Sensor[3].CompensarTime == 0){
-        Sensor[3].CompensarTime = millis();
-      }
-    }
+void CompensacionInercia(){
+
+  if(PitchOut > 1500 && Sensor[0].Activo == false && Sensor[2].Activo == false){
+    Sensor[0].Activo = true;
+  }else if(PitchOut < 1500 && PitchOut != 0 && Sensor[2].Activo == false && Sensor[0].Activo == false){
+    Sensor[2].Activo = true;
+  }else if(PitchOut == 0 && Sensor[0].Activo == true && Sensor[0].CompensarTime == 0){
+    Sensor[0].CompensarTime = millis();
+  }else if(PitchOut == 0 && Sensor[2].Activo == true && Sensor[2].CompensarTime == 0){
+    Sensor[2].CompensarTime = millis();
   }
 
-  //Comprueba los 4 primeros sensores, si CompensarTime != 0, es que se ha modificado el valor para compensar inercia. Si pasan 100ms, sale.
-  for(uint8_t i = 0; i < NSensores; i++){
-    if(Sensor[i].CompensarTime != 0){
-      if(millis()-Sensor[i].CompensarTime > Compensacion){
-        Sensor[i].CompensarTime = 0;
-        Sensor[i].Activo = false;  
+  if(RollOut > 1500 && Sensor[3].Activo == false && Sensor[1].Activo == false){
+    Sensor[3].Activo = true;
+  }else if(RollOut < 1500 && RollOut != 0 && Sensor[1].Activo == false && Sensor[3].Activo == false){
+    Sensor[1].Activo = true;
+  }else if(RollOut == 0 && Sensor[1].Activo == true && Sensor[1].CompensarTime == 0){
+    Sensor[1].CompensarTime = millis();
+  }else if(RollOut == 0 && Sensor[3].Activo == true && Sensor[3].CompensarTime == 0){
+    Sensor[3].CompensarTime = millis();
+  }
+
+  for(int i = 0; i < 4; i++){
+    if(Sensor[i].CompensarTime != 0 && (Sensor[i].CompensarTime + Compensacion > millis())){
+      switch(i){
+        case 0:
+          Pitch = 1300;
+          break;
+        case 1:
+          Roll = 1700;
+          break;
+        case 2:
+          Pitch = 1700;
+          break;
+        case 3:
+          Roll = 1300;
+          break;
+        default:
+          break;
+      }
+    }else if(Sensor[i].CompensarTime != 0){
+      switch(i){
+        case 0:
+        case 2:
+          PitchOut = 0;
+          Sensor[i].Activo = false;
+          Sensor[i].CompensarTime = 0;
+          break;
+        case 1:
+        case 3:
+          RollOut = 0;
+          Sensor[i].Activo = false;
+          Sensor[i].CompensarTime = 0;
+          break;
+        default:
+          break;
       }
     }
   }
+  
 }
 
 //============================MAVLINK==========================//
